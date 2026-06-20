@@ -180,10 +180,10 @@ function shuffle(a) {
 //   requireAdvanced : 答えに ^ か ! を必ず含める（高度な演算が必要）
 //   requireParen    : 答えに括弧を必ず含める
 const LEVEL_CONFIG = {
-  // 1=Easy
-  1: { ks: [2],    ops: ['+', '-', '*'],           min: 1,  max: 20,  parenP: 0,    factP: 0,    factMax: 0, requireAdvanced: false, requireParen: false },
-  // 2=Normal
-  2: { ks: [2, 3], ops: ['+', '-', '*', '/'],      min: 1,  max: 50,  parenP: 0.3,  factP: 0.25, factMax: 4, requireAdvanced: false, requireParen: false },
+  // 1=Easy（題は2桁以上＝1桁にしない）
+  1: { ks: [2],    ops: ['+', '-', '*'],           min: 10, max: 20,  parenP: 0,    factP: 0,    factMax: 0, requireAdvanced: false, requireParen: false },
+  // 2=Normal（題は2桁以上）
+  2: { ks: [2, 3], ops: ['+', '-', '*', '/'],      min: 10, max: 50,  parenP: 0.3,  factP: 0.25, factMax: 4, requireAdvanced: false, requireParen: false },
   // 3=Expert（4〜5項・目標80〜800・括弧と^/!の両方必須）
   3: { ks: [4, 5], ops: ['+', '-', '*', '/', '^'], min: 80, max: 800, parenP: 1,    factP: 0.7,  factMax: 6, requireAdvanced: true,  requireParen: true },
 };
