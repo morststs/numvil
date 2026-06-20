@@ -29,7 +29,10 @@
   let solvedCount = $state(0);
   let dropActive = $state(false);
   let dragOverId = $state(null); // highlight the insertion target while reordering
-  let dragSource = null; // { type:'palette', ch } | { type:'placed', id }
+  let dragSource = $state(null); // { type:'palette', ch } | { type:'placed', id }
+  let dragging = $state(false);  // press has crossed the drag threshold
+  let ghost = $state(null);      // { ch, x, y } floating preview during a drag
+  let startX = 0, startY = 0, activePointer = null;
   let uid = 0;
 
   // Derived state (for display)
@@ -84,32 +87,83 @@
     nextProblem();
   }
 
-  // Drag & drop (desktop) / tap (mobile).
-  // From the palette = add; between placed parts = reorder.
-  function paletteDragStart(e, ch) {
-    if (usedSet.has(ch) || solved || revealed) {
-      e.preventDefault();
-      return;
-    }
-    dragSource = { type: 'palette', ch };
-    e.dataTransfer.effectAllowed = 'copy';
-    e.dataTransfer.setData('text/plain', ch);
+  // --- Unified pointer drag & drop (mouse + touch) with tap fallback ---
+  // A press that moves past a small threshold = drag (reorder / insert).
+  // A plain press = tap (palette: add to end, placed: remove). HTML5 DnD is
+  // avoided because dragstart/drop never fire on touch devices.
+  const DRAG_THRESHOLD = 8; // px before a press becomes a drag
+
+  function placedChar(id) {
+    const p = placed.find((x) => x.id === id);
+    return p ? p.ch : '';
   }
 
-  function placedDragStart(e, id) {
-    if (solved || revealed) {
-      e.preventDefault();
-      return;
-    }
-    dragSource = { type: 'placed', id };
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', '');
-  }
-
-  function dragEnd() {
-    dragSource = null;
+  function partPointerDown(e, source) {
+    if (solved || revealed) return;
+    if (source.type === 'palette' && usedSet.has(source.ch)) return;
+    dragSource = source;
+    dragging = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    activePointer = e.pointerId;
     dragOverId = null;
     dropActive = false;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+  }
+
+  // Which placed token / drop zone is under the pointer? The ghost has
+  // pointer-events:none so it never hit-tests itself.
+  function locateTarget(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return { inZone: false, tokenId: null };
+    const tok = el.closest('[data-token-id]');
+    if (tok) return { inZone: true, tokenId: Number(tok.getAttribute('data-token-id')) };
+    return { inZone: !!el.closest('[data-drop-zone]'), tokenId: null };
+  }
+
+  function partPointerMove(e) {
+    if (!dragSource || e.pointerId !== activePointer) return;
+    if (!dragging) {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < DRAG_THRESHOLD) return;
+      dragging = true;
+    }
+    e.preventDefault();
+    const ch = dragSource.type === 'palette' ? dragSource.ch : placedChar(dragSource.id);
+    ghost = { ch, x: e.clientX, y: e.clientY };
+    const { inZone, tokenId } = locateTarget(e.clientX, e.clientY);
+    dropActive = inZone;
+    dragOverId = tokenId;
+  }
+
+  function partPointerUp(e) {
+    if (!dragSource || e.pointerId !== activePointer) return;
+    if (dragging) {
+      const { inZone, tokenId } = locateTarget(e.clientX, e.clientY);
+      const ontoSelf = dragSource.type === 'placed' && tokenId === dragSource.id;
+      if (!ontoSelf && (inZone || tokenId != null)) commitDrop(tokenId);
+    } else if (dragSource.type === 'palette') {
+      addPart(dragSource.ch); // tap = add to end
+    } else {
+      removeAt(dragSource.id); // tap = remove
+    }
+    endDrag();
+  }
+
+  function partKeyDown(e, source) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (solved || revealed) return;
+    e.preventDefault();
+    if (source.type === 'palette') addPart(source.ch);
+    else removeAt(source.id);
+  }
+
+  function endDrag() {
+    dragSource = null;
+    dragging = false;
+    ghost = null;
+    dragOverId = null;
+    dropActive = false;
+    activePointer = null;
   }
 
   // Build a new array with the source inserted/moved before targetId (null = end)
@@ -140,38 +194,6 @@
       placed = arr;
       checkSolved(arr);
     }
-  }
-
-  // Drop onto the empty area of the expression (append at end)
-  function onContainerDragOver(e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = dragSource?.type === 'placed' ? 'move' : 'copy';
-    dropActive = true;
-  }
-  function onContainerDragLeave() {
-    dropActive = false;
-  }
-  function onContainerDrop(e) {
-    e.preventDefault();
-    commitDrop(null);
-  }
-
-  // Drop onto a token (insert/move before it)
-  function onTokenDragOver(e, id) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = dragSource?.type === 'placed' ? 'move' : 'copy';
-    dragOverId = id;
-    dropActive = false;
-  }
-  function onTokenDrop(e, id) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (dragSource?.type === 'placed' && dragSource.id === id) {
-      dragOverId = null;
-      return; // dropping onto itself does nothing
-    }
-    commitDrop(id);
   }
 
   function fmt(v) {
@@ -249,25 +271,25 @@
 
       <div
         role="list"
+        data-drop-zone
         class="flex min-h-[72px] flex-wrap items-center gap-2 rounded-2xl border-2 border-dashed border-white/10 bg-black/20 p-3 {dropActive ? 'drop-active' : ''}"
-        ondragover={onContainerDragOver}
-        ondragleave={onContainerDragLeave}
-        ondrop={onContainerDrop}
       >
         {#if placed.length === 0}
           <span class="select-none px-2 text-slate-500">Drop parts here / tap to add</span>
         {/if}
         {#each placed as p (p.id)}
           <button
+            data-token-id={p.id}
+            style="touch-action:none"
             class="part-btn animate-pop font-game flex h-12 min-w-[2.75rem] items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-500 px-2 text-2xl font-bold text-white shadow-lg shadow-indigo-900/40 hover:brightness-110
               {!solved && !revealed ? 'cursor-grab active:cursor-grabbing' : ''}
+              {dragging && dragSource?.type === 'placed' && dragSource.id === p.id ? 'opacity-40' : ''}
               {dragOverId === p.id ? 'ring-2 ring-cyan-300 ring-offset-2 ring-offset-slate-900' : ''}"
-            draggable={!solved && !revealed}
-            ondragstart={(e) => placedDragStart(e, p.id)}
-            ondragover={(e) => onTokenDragOver(e, p.id)}
-            ondrop={(e) => onTokenDrop(e, p.id)}
-            ondragend={dragEnd}
-            onclick={() => removeAt(p.id)}
+            onpointerdown={(e) => partPointerDown(e, { type: 'placed', id: p.id })}
+            onpointermove={partPointerMove}
+            onpointerup={partPointerUp}
+            onpointercancel={endDrag}
+            onkeydown={(e) => partKeyDown(e, { type: 'placed', id: p.id })}
             title="Drag to reorder / tap to remove"
           >
             {disp(p.ch)}
@@ -313,14 +335,16 @@
         {#each DIGIT_PARTS as ch}
           {@const used = usedSet.has(ch)}
           <button
+            style="touch-action:none"
             class="part-btn font-game flex h-12 items-center justify-center rounded-xl text-2xl font-bold transition
               {used
                 ? 'cursor-not-allowed bg-white/5 text-slate-600 ring-1 ring-white/10'
                 : 'bg-gradient-to-br from-cyan-500 to-sky-500 text-white shadow-lg shadow-cyan-900/40 hover:brightness-110'}"
-            draggable={!used}
-            ondragstart={(e) => paletteDragStart(e, ch)}
-            ondragend={dragEnd}
-            onclick={() => addPart(ch)}
+            onpointerdown={(e) => partPointerDown(e, { type: 'palette', ch })}
+            onpointermove={partPointerMove}
+            onpointerup={partPointerUp}
+            onpointercancel={endDrag}
+            onkeydown={(e) => partKeyDown(e, { type: 'palette', ch })}
             disabled={used || solved || revealed}
           >
             {disp(ch)}
@@ -332,14 +356,16 @@
         {#each OP_PARTS as ch}
           {@const used = usedSet.has(ch)}
           <button
+            style="touch-action:none"
             class="part-btn font-game flex h-12 items-center justify-center rounded-xl text-2xl font-bold transition
               {used
                 ? 'cursor-not-allowed bg-white/5 text-slate-600 ring-1 ring-white/10'
                 : 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-900/40 hover:brightness-110'}"
-            draggable={!used}
-            ondragstart={(e) => paletteDragStart(e, ch)}
-            ondragend={dragEnd}
-            onclick={() => addPart(ch)}
+            onpointerdown={(e) => partPointerDown(e, { type: 'palette', ch })}
+            onpointermove={partPointerMove}
+            onpointerup={partPointerUp}
+            onpointercancel={endDrag}
+            onkeydown={(e) => partKeyDown(e, { type: 'palette', ch })}
             disabled={used || solved || revealed}
           >
             {disp(ch)}
@@ -370,4 +396,14 @@
       Each part once per expression · you can't join digits into multi-digit numbers
     </footer>
   </div>
+
+  <!-- Floating preview that follows the pointer/finger while dragging -->
+  {#if ghost}
+    <div
+      class="font-game pointer-events-none fixed z-50 flex h-12 min-w-[2.75rem] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-500 px-2 text-2xl font-bold text-white opacity-90 shadow-xl shadow-black/50"
+      style="left:{ghost.x}px; top:{ghost.y}px"
+    >
+      {disp(ghost.ch)}
+    </div>
+  {/if}
 </div>
