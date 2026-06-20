@@ -3,16 +3,15 @@
 @custom-variant dark (&:where(.dark, .dark *));
 @source "../node_modules/flowbite-svelte/dist";
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* 注意: ここに `* { margin:0; padding:0 }` を置くと、Tailwind v4 では
+   レイヤー外の宣言がユーティリティ（p-5 等）を上書きして余白が全部消える。
+   リセットは Tailwind の preflight が担うのでここでは書かない。 */
 
 html, body {
   height: 100%;
-  font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: #1e1b2e;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #e2e8f0;
+  background: #0f172a;
   -webkit-user-select: none;
   user-select: none;
   touch-action: manipulation;
@@ -22,24 +21,24 @@ html, body {
   min-height: 100%;
 }
 
-/* 数字・記号用の丸いフォント */
+/* Rounded display font for numbers/symbols */
 .font-game {
-  font-family: "Fredoka", "Noto Sans JP", sans-serif;
+  font-family: "Fredoka", "Inter", sans-serif;
 }
 
-/* つかみやすいパーツボタンの押下アニメーション */
+/* Tactile press animation for part buttons */
 .part-btn {
-  transition: transform 0.08s ease, box-shadow 0.08s ease, opacity 0.12s ease;
+  transition: transform 0.08s ease, filter 0.08s ease, box-shadow 0.08s ease, opacity 0.12s ease;
 }
 .part-btn:active {
   transform: translateY(2px) scale(0.96);
 }
 
-/* ドロップ可能ゾーンの強調 */
+/* Highlighted drop zone */
 .drop-active {
-  outline: 3px dashed #7c3aed;
+  outline: 2px dashed #22d3ee;
   outline-offset: -6px;
-  background-color: #f5f3ff;
+  background-color: rgba(34, 211, 238, 0.08);
 }
 
 @keyframes pop {

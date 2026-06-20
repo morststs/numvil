@@ -1,5 +1,5 @@
 <script>
-  import { Button, Badge } from 'flowbite-svelte';
+  import { Badge } from 'flowbite-svelte';
   import {
     DIGIT_PARTS,
     OP_PARTS,
@@ -8,7 +8,7 @@
     generateProblem,
   } from './lib/engine.js';
 
-  // 記号の表示用マッピング（内部のトークンは元の文字のまま）
+  // Display mapping for operator symbols (internal tokens stay as raw chars)
   const DISP = {
     '*': '×', '/': '÷', '-': '−', '^': '^', '!': '!',
     '+': '+', '(': '(', ')': ')',
@@ -16,41 +16,40 @@
   const disp = (ch) => DISP[ch] ?? ch;
 
   const LEVELS = [
-    { value: 1, label: 'やさしい' },
-    { value: 2, label: 'ふつう' },
-    { value: 3, label: 'むずかしい' },
+    { value: 1, label: 'Easy' },
+    { value: 2, label: 'Normal' },
+    { value: 3, label: 'Expert' },
   ];
 
   let level = $state(1);
   let problem = $state(generateProblem(1));
   let placed = $state([]); // [{ id, ch }]
-  let revealed = $state(false); // 降参で答えを表示中
-  let solved = $state(false); // クリア済み（演出中）
+  let revealed = $state(false); // showing the answer after Give up
+  let solved = $state(false); // cleared (waiting for Next)
   let solvedCount = $state(0);
   let dropActive = $state(false);
+  let dragOverId = $state(null); // highlight the insertion target while reordering
+  let dragSource = null; // { type:'palette', ch } | { type:'placed', id }
   let uid = 0;
-  let solveTimer = null;
 
-  // 派生状態（表示用）
+  // Derived state (for display)
   let usedSet = $derived(new Set(placed.map((p) => p.ch)));
   let result = $derived(evaluate(placed.map((p) => p.ch)));
   let cleared = $derived(result.ok && matchesTarget(result.value, problem.target));
 
-  // 式が題に一致したら演出 → 自動で次の題へ（イミュータブルに判定し副作用ループを避ける）
+  // When the expression matches the target, mark solved (no auto-advance; user presses Next)
   function checkSolved(tokens) {
     if (solved || revealed) return;
     const r = evaluate(tokens.map((p) => p.ch));
     if (r.ok && matchesTarget(r.value, problem.target)) {
       solved = true;
       solvedCount += 1;
-      clearTimeout(solveTimer);
-      solveTimer = setTimeout(() => nextProblem(), 1500);
     }
   }
 
   function addPart(ch) {
     if (solved || revealed) return;
-    if (usedSet.has(ch)) return; // 各パーツは1式に1回まで
+    if (usedSet.has(ch)) return; // each part can be used once per expression
     const next = [...placed, { id: uid++, ch }];
     placed = next;
     checkSolved(next);
@@ -67,7 +66,6 @@
   }
 
   function nextProblem() {
-    clearTimeout(solveTimer);
     problem = generateProblem(level);
     placed = [];
     revealed = false;
@@ -77,7 +75,7 @@
   function surrender() {
     if (solved) return;
     revealed = true;
-    // 答えの式を「式」ペインに反映して見せる
+    // Show the solution inside the expression pane
     placed = problem.answer.map((ch) => ({ id: uid++, ch }));
   }
 
@@ -86,28 +84,94 @@
     nextProblem();
   }
 
-  // ドラッグ&ドロップ（デスクトップ）／タップ（モバイル）両対応
-  function onDragStart(e, ch) {
-    if (usedSet.has(ch)) {
+  // Drag & drop (desktop) / tap (mobile).
+  // From the palette = add; between placed parts = reorder.
+  function paletteDragStart(e, ch) {
+    if (usedSet.has(ch) || solved || revealed) {
       e.preventDefault();
       return;
     }
-    e.dataTransfer.setData('text/plain', ch);
+    dragSource = { type: 'palette', ch };
     e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', ch);
   }
-  function onDragOver(e) {
+
+  function placedDragStart(e, id) {
+    if (solved || revealed) {
+      e.preventDefault();
+      return;
+    }
+    dragSource = { type: 'placed', id };
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', '');
+  }
+
+  function dragEnd() {
+    dragSource = null;
+    dragOverId = null;
+    dropActive = false;
+  }
+
+  // Build a new array with the source inserted/moved before targetId (null = end)
+  function buildDrop(targetId) {
+    if (!dragSource) return null;
+    const arr = placed.slice();
+    if (dragSource.type === 'palette') {
+      if (usedSet.has(dragSource.ch)) return null;
+      const at = targetId == null ? arr.length : arr.findIndex((p) => p.id === targetId);
+      arr.splice(at < 0 ? arr.length : at, 0, { id: uid++, ch: dragSource.ch });
+    } else {
+      const from = arr.findIndex((p) => p.id === dragSource.id);
+      if (from < 0) return null;
+      const [item] = arr.splice(from, 1);
+      let at = targetId == null ? arr.length : arr.findIndex((p) => p.id === targetId);
+      if (at < 0) at = arr.length;
+      arr.splice(at, 0, item);
+    }
+    return arr;
+  }
+
+  function commitDrop(targetId) {
+    if (solved || revealed) return;
+    const arr = buildDrop(targetId);
+    dragOverId = null;
+    dropActive = false;
+    if (arr) {
+      placed = arr;
+      checkSolved(arr);
+    }
+  }
+
+  // Drop onto the empty area of the expression (append at end)
+  function onContainerDragOver(e) {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = dragSource?.type === 'placed' ? 'move' : 'copy';
     dropActive = true;
   }
-  function onDragLeave() {
+  function onContainerDragLeave() {
     dropActive = false;
   }
-  function onDrop(e) {
+  function onContainerDrop(e) {
     e.preventDefault();
+    commitDrop(null);
+  }
+
+  // Drop onto a token (insert/move before it)
+  function onTokenDragOver(e, id) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = dragSource?.type === 'placed' ? 'move' : 'copy';
+    dragOverId = id;
     dropActive = false;
-    const ch = e.dataTransfer.getData('text/plain');
-    if (ch) addPart(ch);
+  }
+  function onTokenDrop(e, id) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (dragSource?.type === 'placed' && dragSource.id === id) {
+      dragOverId = null;
+      return; // dropping onto itself does nothing
+    }
+    commitDrop(id);
   }
 
   function fmt(v) {
@@ -116,21 +180,25 @@
   }
 </script>
 
-<div class="min-h-screen w-full bg-gradient-to-br from-violet-100 via-sky-100 to-emerald-100 p-3 sm:p-5">
-  <div class="mx-auto flex max-w-3xl flex-col gap-3 sm:gap-4">
+<div class="min-h-screen w-full bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-950 p-5 text-slate-100 sm:p-8 lg:p-12">
+  <div class="mx-auto flex max-w-3xl flex-col gap-4 sm:gap-5">
 
-    <!-- ヘッダー -->
-    <header class="flex flex-wrap items-center justify-between gap-2">
-      <h1 class="font-game text-2xl font-bold text-violet-700 sm:text-3xl">🧮 Numvil</h1>
-      <div class="flex items-center gap-2">
-        <span class="rounded-full bg-white/70 px-3 py-1 text-sm font-bold text-emerald-600 shadow">
-          クリア {solvedCount}
+    <!-- Header -->
+    <header class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="font-game bg-gradient-to-r from-cyan-300 via-sky-300 to-violet-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent sm:text-4xl">
+        Numvil
+      </h1>
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <span class="rounded-full bg-white/5 px-4 py-1.5 text-sm font-bold text-cyan-300 ring-1 ring-white/10">
+          Solved {solvedCount}
         </span>
-        <div class="flex overflow-hidden rounded-full bg-white/70 shadow">
+        <div class="flex gap-1 rounded-full bg-white/5 p-1 ring-1 ring-white/10">
           {#each LEVELS as lv}
             <button
-              class="px-3 py-1 text-sm font-bold transition
-                {level === lv.value ? 'bg-violet-600 text-white' : 'text-violet-700 hover:bg-violet-100'}"
+              class="rounded-full px-4 py-1.5 text-sm font-bold whitespace-nowrap transition
+                {level === lv.value
+                  ? 'bg-gradient-to-r from-cyan-500 to-indigo-500 text-white shadow-lg shadow-indigo-900/40'
+                  : 'text-slate-300 hover:bg-white/10'}"
               onclick={() => changeLevel(lv.value)}
             >
               {lv.label}
@@ -140,42 +208,67 @@
       </div>
     </header>
 
-    <!-- 題ペイン -->
-    <section class="rounded-3xl bg-white/80 p-4 text-center shadow-lg ring-1 ring-violet-200 sm:p-6">
-      <div class="text-sm font-bold tracking-widest text-violet-400">題（この数を作ろう）</div>
-      <div class="font-game mt-1 text-6xl font-bold text-violet-700 sm:text-7xl">
+    <!-- Target -->
+    <section class="rounded-3xl bg-white/5 p-6 text-center shadow-xl shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl">
+      <div class="text-xs font-bold uppercase tracking-[0.3em] text-cyan-300/70">Make this number</div>
+      <div class="font-game mt-2 bg-gradient-to-br from-cyan-300 via-sky-300 to-violet-400 bg-clip-text text-6xl font-bold text-transparent sm:text-7xl">
         {problem.target}
       </div>
     </section>
 
-    <!-- 式ペイン（ドロップ先） -->
-    <section class="rounded-3xl bg-white/80 p-4 shadow-lg ring-1 ring-sky-200">
-      <div class="mb-2 flex items-center justify-between">
-        <span class="text-sm font-bold tracking-widest text-sky-400">式（パーツを並べる）</span>
+    <!-- Result -->
+    <section class="rounded-3xl p-5 text-center shadow-xl shadow-black/30 ring-1 backdrop-blur-xl transition
+      {cleared ? 'bg-emerald-400/10 ring-emerald-300/40' : 'bg-white/5 ring-white/10'}">
+      <div class="text-xs font-bold uppercase tracking-[0.3em] {cleared ? 'text-emerald-300' : 'text-slate-400'}">Result</div>
+      {#if placed.length === 0}
+        <div class="font-game mt-1 text-4xl font-bold text-slate-600">—</div>
+      {:else if result.ok}
+        <div class="font-game mt-1 text-5xl font-bold {cleared ? 'text-emerald-300' : 'text-cyan-200'}">
+          {fmt(result.value)}
+        </div>
+        {#if cleared}
+          <div class="animate-cheer mt-1 text-xl font-bold text-emerald-300">🎉 Solved!</div>
+        {/if}
+      {:else}
+        <div class="font-game mt-1 text-2xl font-bold text-rose-300/80">Invalid expression</div>
+      {/if}
+    </section>
+
+    <!-- Expression (drop target) -->
+    <section class="rounded-3xl bg-white/5 p-5 shadow-xl shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl">
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <span class="min-w-0 truncate text-xs font-bold uppercase tracking-[0.2em] text-indigo-300/70">Expression — drag to reorder</span>
         <button
-          class="rounded-full px-3 py-1 text-xs font-bold text-sky-600 hover:bg-sky-100 disabled:opacity-30"
+          class="shrink-0 whitespace-nowrap rounded-full px-4 py-1.5 text-sm font-bold text-indigo-300 transition hover:bg-white/10 disabled:opacity-30"
           onclick={clearExpr}
           disabled={placed.length === 0 || revealed || solved}
         >
-          ぜんぶ消す
+          Clear all
         </button>
       </div>
 
       <div
         role="list"
-        class="flex min-h-[68px] flex-wrap items-center gap-1.5 rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/50 p-3 {dropActive ? 'drop-active' : ''}"
-        ondragover={onDragOver}
-        ondragleave={onDragLeave}
-        ondrop={onDrop}
+        class="flex min-h-[72px] flex-wrap items-center gap-2 rounded-2xl border-2 border-dashed border-white/10 bg-black/20 p-3 {dropActive ? 'drop-active' : ''}"
+        ondragover={onContainerDragOver}
+        ondragleave={onContainerDragLeave}
+        ondrop={onContainerDrop}
       >
         {#if placed.length === 0}
-          <span class="select-none px-2 text-sky-300">ここにパーツをドロップ / タップで追加</span>
+          <span class="select-none px-2 text-slate-500">Drop parts here / tap to add</span>
         {/if}
         {#each placed as p (p.id)}
           <button
-            class="part-btn animate-pop font-game flex h-12 min-w-[2.75rem] items-center justify-center rounded-xl bg-sky-500 px-2 text-2xl font-bold text-white shadow hover:bg-sky-600"
+            class="part-btn animate-pop font-game flex h-12 min-w-[2.75rem] items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-indigo-500 px-2 text-2xl font-bold text-white shadow-lg shadow-indigo-900/40 hover:brightness-110
+              {!solved && !revealed ? 'cursor-grab active:cursor-grabbing' : ''}
+              {dragOverId === p.id ? 'ring-2 ring-cyan-300 ring-offset-2 ring-offset-slate-900' : ''}"
+            draggable={!solved && !revealed}
+            ondragstart={(e) => placedDragStart(e, p.id)}
+            ondragover={(e) => onTokenDragOver(e, p.id)}
+            ondrop={(e) => onTokenDrop(e, p.id)}
+            ondragend={dragEnd}
             onclick={() => removeAt(p.id)}
-            title="タップで取り除く"
+            title="Drag to reorder / tap to remove"
           >
             {disp(p.ch)}
           </button>
@@ -183,48 +276,50 @@
       </div>
     </section>
 
-    <!-- 結果ペイン -->
-    <section class="rounded-3xl p-4 text-center shadow-lg ring-1 transition
-      {cleared ? 'bg-emerald-100 ring-emerald-300' : 'bg-white/80 ring-amber-200'}">
-      <div class="text-sm font-bold tracking-widest {cleared ? 'text-emerald-500' : 'text-amber-400'}">結果</div>
-      {#if placed.length === 0}
-        <div class="font-game mt-1 text-4xl font-bold text-gray-300">—</div>
-      {:else if result.ok}
-        <div class="font-game mt-1 text-5xl font-bold {cleared ? 'text-emerald-600' : 'text-amber-600'}">
-          {fmt(result.value)}
-        </div>
-        {#if cleared}
-          <div class="animate-cheer mt-1 text-xl font-bold text-emerald-600">🎉 クリア！</div>
-        {/if}
-      {:else}
-        <div class="font-game mt-1 text-3xl font-bold text-rose-400">式が正しくありません</div>
-      {/if}
-    </section>
-
-    <!-- 降参時の答え -->
-    {#if revealed}
-      <section class="animate-pop rounded-3xl bg-rose-50 p-4 text-center shadow ring-1 ring-rose-200">
-        <div class="text-sm font-bold tracking-widest text-rose-400">答えの一例</div>
-        <div class="font-game mt-1 text-3xl font-bold text-rose-600">
-          {problem.answer.map(disp).join(' ')} = {problem.target}
-        </div>
-        <Button color="purple" class="mt-3 rounded-full" onclick={nextProblem}>つぎの題へ ▶</Button>
+    <!-- Solved: no auto-advance, press Next -->
+    {#if solved}
+      <section class="animate-cheer rounded-3xl bg-emerald-400/10 p-5 text-center shadow-xl shadow-black/30 ring-1 ring-emerald-300/40 backdrop-blur-xl">
+        <div class="text-2xl font-bold text-emerald-300">🎉 Solved! Correct!</div>
+        <button
+          class="mt-3 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-emerald-900/40 transition hover:brightness-110"
+          onclick={nextProblem}
+        >
+          Next ▶
+        </button>
       </section>
     {/if}
 
-    <!-- パーツペイン -->
-    <section class="rounded-3xl bg-white/80 p-4 shadow-lg ring-1 ring-emerald-200">
-      <div class="mb-2 text-sm font-bold tracking-widest text-emerald-400">パーツ</div>
+    <!-- Give up: show a solution -->
+    {#if revealed}
+      <section class="animate-pop rounded-3xl bg-rose-400/10 p-5 text-center shadow-xl shadow-black/30 ring-1 ring-rose-300/30 backdrop-blur-xl">
+        <div class="text-xs font-bold uppercase tracking-[0.2em] text-rose-300/80">One solution</div>
+        <div class="font-game mt-2 text-3xl font-bold text-rose-200">
+          {problem.answer.map(disp).join(' ')} = {problem.target}
+        </div>
+        <button
+          class="mt-3 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-fuchsia-900/40 transition hover:brightness-110"
+          onclick={nextProblem}
+        >
+          Next ▶
+        </button>
+      </section>
+    {/if}
+
+    <!-- Parts -->
+    <section class="rounded-3xl bg-white/5 p-5 shadow-xl shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl">
+      <div class="mb-3 text-xs font-bold uppercase tracking-[0.3em] text-cyan-300/70">Parts</div>
 
       <div class="grid grid-cols-5 gap-2 sm:grid-cols-10">
         {#each DIGIT_PARTS as ch}
           {@const used = usedSet.has(ch)}
           <button
-            class="part-btn font-game flex h-12 items-center justify-center rounded-xl text-2xl font-bold shadow
-              {used ? 'cursor-not-allowed bg-gray-200 text-gray-400 opacity-50'
-                    : 'bg-emerald-500 text-white hover:bg-emerald-600'}"
+            class="part-btn font-game flex h-12 items-center justify-center rounded-xl text-2xl font-bold transition
+              {used
+                ? 'cursor-not-allowed bg-white/5 text-slate-600 ring-1 ring-white/10'
+                : 'bg-gradient-to-br from-cyan-500 to-sky-500 text-white shadow-lg shadow-cyan-900/40 hover:brightness-110'}"
             draggable={!used}
-            ondragstart={(e) => onDragStart(e, ch)}
+            ondragstart={(e) => paletteDragStart(e, ch)}
+            ondragend={dragEnd}
             onclick={() => addPart(ch)}
             disabled={used || solved || revealed}
           >
@@ -237,11 +332,13 @@
         {#each OP_PARTS as ch}
           {@const used = usedSet.has(ch)}
           <button
-            class="part-btn font-game flex h-12 items-center justify-center rounded-xl text-2xl font-bold shadow
-              {used ? 'cursor-not-allowed bg-gray-200 text-gray-400 opacity-50'
-                    : 'bg-orange-500 text-white hover:bg-orange-600'}"
+            class="part-btn font-game flex h-12 items-center justify-center rounded-xl text-2xl font-bold transition
+              {used
+                ? 'cursor-not-allowed bg-white/5 text-slate-600 ring-1 ring-white/10'
+                : 'bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-900/40 hover:brightness-110'}"
             draggable={!used}
-            ondragstart={(e) => onDragStart(e, ch)}
+            ondragstart={(e) => paletteDragStart(e, ch)}
+            ondragend={dragEnd}
             onclick={() => addPart(ch)}
             disabled={used || solved || revealed}
           >
@@ -251,19 +348,26 @@
       </div>
     </section>
 
-    <!-- 操作 -->
-    <div class="flex items-center justify-center gap-3 pb-4">
-      <Button color="alternative" class="rounded-full" onclick={surrender} disabled={solved || revealed}>
-        🏳️ 降参する
-      </Button>
-      <Button color="green" class="rounded-full" onclick={nextProblem}>
-        🔄 次の題
-      </Button>
+    <!-- Actions -->
+    <div class="flex items-center justify-center gap-3 pb-2">
+      <button
+        class="rounded-full bg-white/5 px-8 py-2.5 font-bold text-slate-200 ring-1 ring-white/15 transition hover:bg-white/10 disabled:opacity-30"
+        onclick={surrender}
+        disabled={solved || revealed}
+      >
+        🏳️ Give up
+      </button>
+      <button
+        class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-indigo-900/40 transition hover:brightness-110"
+        onclick={nextProblem}
+      >
+        🔄 New
+      </button>
     </div>
 
-    <footer class="pb-4 text-center text-xs text-violet-400">
-      <Badge color="purple" class="mr-1">ルール</Badge>
-      パーツは各1個・1式に1回まで／数字を並べて2桁以上は作れません
+    <footer class="pb-2 text-center text-xs text-slate-400">
+      <Badge color="indigo" class="mr-1">Rules</Badge>
+      Each part once per expression · you can't join digits into multi-digit numbers
     </footer>
   </div>
 </div>

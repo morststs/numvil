@@ -61,4 +61,5 @@ docker compose --profile android up --build android    # android apk -> ./output
   （`@import "tailwindcss"` ＋ flowbite プラグイン）。`tailwind.config.js` は無い。
 - `vite.config.js` で `base: './'` を指定し、任意のホストパス／`file://`／Wails の
   いずれでも assets を解決できるようにしている。
-- UI 文言とコメントは日本語（仕様・参考リポジトリに合わせる）。
+- **UI 文言は英語**（ダークなクール配色テーマ）。コードのコメントとドキュメント（README/CLAUDE/skills）は日本語。
+- 難易度は3段階：`engine.js` の `LEVEL_CONFIG` のキー `1=Easy / 2=Normal / 3=Expert`（最上位 Expert が最難）。`App.svelte` の `LEVELS` と対応。

@@ -1,0 +1,31 @@
+{
+  // Vite 開発サーバーを起動するタスク。launch.json の preLaunchTask から使う。
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "vite-dev",
+      "type": "shell",
+      "command": "npm run dev:host",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      // バックグラウンドタスクが「準備完了」になった瞬間を VS Code に伝えるための matcher。
+      // これが無いと preLaunchTask がいつまでも完了待ちになる。
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*VITE v.*",
+          "endsPattern": ".*(Local:|ready in).*"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    }
+  ]
+}

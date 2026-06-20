@@ -44,34 +44,61 @@ invalid('empty', []);
 invalid('div-zero', ['1', '/', '0']);
 invalid('unbalanced', ['(', '1', '+', '2']);
 
-// ジェネレータ: 生成した式は必ず題に一致する
+// ジェネレータ: 生成した式は必ず題に一致し、各レベルの難易度要件を満たす
+const LEVEL_REQ = {
+  1: { min: 1, max: 20, advanced: false, paren: false },
+  2: { min: 1, max: 50, advanced: false, paren: false },
+  3: { min: 80, max: 800, advanced: true, paren: true }, // Expert
+};
+let genFail = 0;
 for (const level of [1, 2, 3]) {
-  for (let i = 0; i < 300; i++) {
+  const req = LEVEL_REQ[level];
+  let fallbacks = 0;
+  for (let i = 0; i < 500; i++) {
     const p = generateProblem(level);
     const r = evaluate([...p.answer]);
     if (!r.ok || !matchesTarget(r.value, p.target)) {
-      fail++;
+      genFail++;
       console.log(`FAIL gen L${level}: ${p.answer.join('')} != target ${p.target}`);
       break;
     }
-    if (p.target < 1) {
-      fail++;
-      console.log(`FAIL gen L${level}: target out of range ${p.target}`);
+    if (p.target < req.min || p.target > req.max) {
+      genFail++;
+      console.log(`FAIL gen L${level}: target ${p.target} outside [${req.min}, ${req.max}]`);
       break;
     }
-    // パーツ各1個制約の検証
+    // パーツ各1個制約
     const counts = {};
     for (const t of p.answer) counts[t] = (counts[t] || 0) + 1;
-    for (const t in counts) {
-      if (counts[t] > 1) {
-        fail++;
-        console.log(`FAIL gen L${level}: part '${t}' used ${counts[t]}x in ${p.answer.join('')}`);
-        break;
-      }
+    const dup = Object.entries(counts).find(([, c]) => c > 1);
+    if (dup) {
+      genFail++;
+      console.log(`FAIL gen L${level}: part '${dup[0]}' used ${dup[1]}x in ${p.answer.join('')}`);
+      break;
+    }
+    // 難易度要件
+    if (req.advanced && !p.answer.includes('^') && !p.answer.includes('!')) {
+      genFail++;
+      console.log(`FAIL gen L${level}: missing advanced op (^ or !) in ${p.answer.join('')}`);
+      break;
+    }
+    if (req.paren && !p.answer.includes('(')) {
+      genFail++;
+      console.log(`FAIL gen L${level}: missing paren in ${p.answer.join('')}`);
+      break;
+    }
+    // フォールバックに頼っていないか（固定答えの target と完全一致が多すぎないかの目安）
+    if (level === 3 && p.answer.join('') === '(1+4)^3-9*2') {
+      fallbacks++;
     }
   }
+  if (fallbacks > 5) {
+    genFail++;
+    console.log(`FAIL gen L${level}: too many fallbacks (${fallbacks}/500) — generator not producing variety`);
+  }
 }
-pass++; // generator loops completed
+if (genFail === 0) pass++;
+else fail += genFail;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

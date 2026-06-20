@@ -1,0 +1,28 @@
+{
+  // 「実行とデバッグ」（Ctrl+Shift+D）でこの構成を選び、F5 で起動する。
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // ① おすすめ：Vite を起動し、ブラウザを自動で開いてデバッグ接続する。
+      //    preLaunchTask で dev サーバーを立ち上げてから Chrome を開く。
+      //    ポート 5173 は自動転送されるので「ポート」パネルを触る必要なし。
+      //    Chrome が無い場合は "type": "msedge" に変えれば Edge で開く。
+      "name": "▶ Vite Dev（ブラウザを開く）",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/frontend",
+      "preLaunchTask": "vite-dev"
+    },
+    {
+      // ② 確実版：ブラウザを開かず、統合ターミナルで dev サーバーを実行するだけ。
+      //    Chrome/Edge が無い環境やデバッガ接続が不要なときはこちら。
+      //    起動後、自分のPCのブラウザで http://localhost:5173 を開く。
+      "name": "▶ Vite Dev（ターミナルのみ）",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev:host",
+      "cwd": "${workspaceFolder}/frontend"
+    }
+  ]
+}

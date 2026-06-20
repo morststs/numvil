@@ -171,16 +171,31 @@ function shuffle(a) {
   return b;
 }
 
-// level: 1=やさしい / 2=ふつう / 3=むずかしい
-export function generateProblem(level = 1) {
-  const maxTarget = level <= 1 ? 20 : level === 2 ? 50 : 99;
-  const kChoices = level <= 1 ? [2] : level === 2 ? [2, 3] : [3, 4];
-  const ops = level <= 1 ? ['+', '-', '*'] : level === 2 ? ['+', '-', '*', '/'] : ['+', '-', '*', '/', '^'];
+// レベル設定：上に行くほど「項数が多い・目標値が大きく中途半端・括弧/階乗/べき乗が必須」になる。
+//   ks            : オペランド（数字）の個数の候補
+//   ops           : 使う二項演算子
+//   min/max       : 題（目標値）のレンジ。min を上げるほど自明な小さい解が消えて難しくなる
+//   parenP        : 括弧を1組使う確率（requireParen=true なら必ず使う）
+//   factP/factMax : 階乗を付ける確率と、付けてよい数字の上限
+//   requireAdvanced : 答えに ^ か ! を必ず含める（高度な演算が必要）
+//   requireParen    : 答えに括弧を必ず含める
+const LEVEL_CONFIG = {
+  // 1=Easy
+  1: { ks: [2],    ops: ['+', '-', '*'],           min: 1,  max: 20,  parenP: 0,    factP: 0,    factMax: 0, requireAdvanced: false, requireParen: false },
+  // 2=Normal
+  2: { ks: [2, 3], ops: ['+', '-', '*', '/'],      min: 1,  max: 50,  parenP: 0.3,  factP: 0.25, factMax: 4, requireAdvanced: false, requireParen: false },
+  // 3=Expert（4〜5項・目標80〜800・括弧と^/!の両方必須）
+  3: { ks: [4, 5], ops: ['+', '-', '*', '/', '^'], min: 80, max: 800, parenP: 1,    factP: 0.7,  factMax: 6, requireAdvanced: true,  requireParen: true },
+};
 
-  for (let attempt = 0; attempt < 5000; attempt++) {
-    const k = pick(kChoices);
+// level: 1=Easy / 2=Normal / 3=Expert
+export function generateProblem(level = 1) {
+  const cfg = LEVEL_CONFIG[level] || LEVEL_CONFIG[1];
+
+  for (let attempt = 0; attempt < 20000; attempt++) {
+    const k = pick(cfg.ks);
     const digits = shuffle(DIGIT_PARTS).slice(0, k); // 相異なる数字（各1個制約を満たす）
-    const opsPool = shuffle(ops);
+    const opsPool = shuffle(cfg.ops);
     if (k - 1 > opsPool.length) continue;
     const opseq = opsPool.slice(0, k - 1); // 相異なる演算子（各1個制約）
 
@@ -190,16 +205,18 @@ export function generateProblem(level = 1) {
       if (i < k - 1) tokens.push(opseq[i]);
     }
 
-    // 確率で先頭の2項を1組の括弧で囲む（括弧は各1個なので1グループのみ）
-    if (level >= 2 && k >= 3 && Math.random() < 0.4) {
+    // 括弧（1組のみ）：先頭の「数字 演算子 数字」を囲んで優先順位を変える
+    const wantParen = k >= 3 && (cfg.requireParen || Math.random() < cfg.parenP);
+    if (wantParen) {
       tokens = ['(', tokens[0], tokens[1], tokens[2], ')', ...tokens.slice(3)];
     }
 
-    // 確率で小さい数字に階乗を付ける（!は1個）
-    if (level >= 2 && Math.random() < 0.3) {
+    // 階乗（!は1個）：小さい数字に付ける
+    if (cfg.factP > 0 && Math.random() < cfg.factP) {
+      const re = new RegExp('^[0-' + cfg.factMax + ']$');
       const idxs = [];
       for (let i = 0; i < tokens.length; i++) {
-        if (/[0-4]/.test(tokens[i])) idxs.push(i);
+        if (re.test(tokens[i])) idxs.push(i);
       }
       if (idxs.length) {
         const at = pick(idxs);
@@ -207,16 +224,30 @@ export function generateProblem(level = 1) {
       }
     }
 
+    // レベル要件のチェック
+    if (cfg.requireParen && !tokens.includes('(')) continue;
+    if (cfg.requireAdvanced && !tokens.includes('^') && !tokens.includes('!')) continue;
+
     const res = evaluate(tokens);
     if (!res.ok) continue;
     const v = res.value;
     if (Math.abs(v - Math.round(v)) > 1e-9) continue; // 整数の題のみ
     const target = Math.round(v);
-    if (target < 1 || target > maxTarget) continue;
+    if (target < cfg.min || target > cfg.max) continue;
 
     return { target, answer: tokens.slice(), level };
   }
 
-  // フォールバック（理論上ほぼ到達しない）
-  return { target: 3, answer: ['1', '+', '2'], level };
+  return fallbackProblem(level);
+}
+
+// 生成に失敗した場合の保険（各レベルの要件を満たす固定問題）
+function fallbackProblem(level) {
+  const FB = {
+    1: { target: 12, answer: ['3', '*', '4'] },
+    2: { target: 23, answer: ['5', '*', '4', '+', '3'] },
+    3: { target: 107, answer: ['(', '1', '+', '4', ')', '^', '3', '-', '9', '*', '2'] }, // (1+4)^3-9*2
+  };
+  const f = FB[level] || FB[1];
+  return { target: f.target, answer: f.answer.slice(), level };
 }
