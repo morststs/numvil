@@ -1,0 +1,29 @@
+# docker compose up   … Web 静的コンテンツ + Windows exe をビルドして ./output に出力
+# docker compose --profile android up android … Android APK をビルド（要 SDK ダウンロード）
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: numvil-builder
+    volumes:
+      - ./:/app
+      - go-mod-cache:/go/pkg/mod
+    working_dir: /app
+    command: bash scripts/build.sh
+
+  android:
+    profiles: ["android"]
+    build:
+      context: .
+      dockerfile: Dockerfile.android
+    image: numvil-android
+    volumes:
+      - ./:/app
+      - gradle-cache:/root/.gradle
+    working_dir: /app
+    command: bash scripts/build-android.sh
+
+volumes:
+  go-mod-cache:
+  gradle-cache:

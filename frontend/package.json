@@ -1,0 +1,23 @@
+{
+  "name": "numvil-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node test/engine.test.mjs"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@tailwindcss/vite": "^4.3.1",
+    "flowbite": "^4.0.2",
+    "svelte": "^5.56.3",
+    "tailwindcss": "^4.3.1",
+    "vite": "^7.1.12"
+  },
+  "dependencies": {
+    "flowbite-svelte": "^1.33.1"
+  }
+}
