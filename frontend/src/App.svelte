@@ -7,6 +7,19 @@
     matchesTarget,
     generateProblem,
   } from './lib/engine.js';
+  import {
+    CHALLENGE_PROBLEMS,
+    CHALLENGE_LEVELS,
+    PROBLEMS_PER_LEVEL,
+  } from './lib/problems.js';
+  import {
+    loadHistory,
+    recordSolve,
+    getSolve,
+    solvedCountForLevel,
+    historyList,
+    clearHistory,
+  } from './lib/storage.js';
 
   // Display mapping for operator symbols (internal tokens stay as raw chars)
   const DISP = {
@@ -14,19 +27,32 @@
     '+': '+', '(': '(', ')': ')',
   };
   const disp = (ch) => DISP[ch] ?? ch;
+  const dispExpr = (s) => [...s].map(disp).join('');
 
+  // Endless mode levels (free generated problems)
   const LEVELS = [
     { value: 1, label: 'Easy' },
     { value: 2, label: 'Normal' },
     { value: 3, label: 'Expert' },
   ];
 
+  // 'endless' = original free-play; 'challenge' = fixed 5×10 problem set
+  let mode = $state('endless');
+
+  // Endless mode state
   let level = $state(1);
-  let problem = $state(generateProblem(1));
+
+  // Challenge mode state (出題モード)
+  let chLevel = $state(1); // 1..5
+  let chIndex = $state(0); // 0..9
+  let history = $state(loadHistory()); // solved records from localStorage
+  let showHistory = $state(false);
+
+  let problem = $state(generateProblem(1)); // { target, answer? }
   let placed = $state([]); // [{ id, ch }]
-  let revealed = $state(false); // showing the answer after Give up
+  let revealed = $state(false); // showing the answer after Give up (endless only)
   let solved = $state(false); // cleared (waiting for Next)
-  let solvedCount = $state(0);
+  let solvedCount = $state(0); // endless session counter
   let dropActive = $state(false);
   let dragOverId = $state(null); // highlight the insertion target while reordering
   let dragSource = $state(null); // { type:'palette', ch } | { type:'placed', id }
@@ -40,14 +66,47 @@
   let result = $derived(evaluate(placed.map((p) => p.ch)));
   let cleared = $derived(result.ok && matchesTarget(result.value, problem.target));
 
+  // Challenge-mode derived helpers
+  let chProblems = $derived(CHALLENGE_PROBLEMS[chLevel] ?? []);
+  let chSolvedCount = $derived(solvedCountForLevel(history, chLevel));
+  let chLevelComplete = $derived(chSolvedCount >= PROBLEMS_PER_LEVEL);
+  let priorSolve = $derived(
+    mode === 'challenge' ? getSolve(history, chLevel, chIndex) : null
+  );
+  let recentHistory = $derived(historyList(history));
+
   // When the expression matches the target, mark solved (no auto-advance; user presses Next)
   function checkSolved(tokens) {
     if (solved || revealed) return;
     const r = evaluate(tokens.map((p) => p.ch));
     if (r.ok && matchesTarget(r.value, problem.target)) {
       solved = true;
-      solvedCount += 1;
+      if (mode === 'endless') {
+        solvedCount += 1;
+      } else {
+        // 出題モード：解いた問題・数式・時刻をローカルストレージに保存
+        history = recordSolve(history, {
+          level: chLevel,
+          index: chIndex,
+          target: problem.target,
+          expr: tokens.map((p) => p.ch).join(''),
+        });
+      }
     }
+  }
+
+  // Load the current problem for the active mode and reset the board.
+  function loadProblem() {
+    if (mode === 'endless') {
+      problem = generateProblem(level);
+    } else {
+      const p = chProblems[chIndex];
+      // 出題モードでは答えは見せない（answer は持たせない）
+      problem = { target: p ? p.target : 0, level: chLevel };
+    }
+    placed = [];
+    revealed = false;
+    solved = false;
   }
 
   function addPart(ch) {
@@ -69,14 +128,11 @@
   }
 
   function nextProblem() {
-    problem = generateProblem(level);
-    placed = [];
-    revealed = false;
-    solved = false;
+    loadProblem();
   }
 
   function surrender() {
-    if (solved) return;
+    if (solved || mode !== 'endless') return; // 出題モードは答えを見られない
     revealed = true;
     // Show the solution inside the expression pane
     placed = problem.answer.map((ch) => ({ id: uid++, ch }));
@@ -84,7 +140,37 @@
 
   function changeLevel(v) {
     level = v;
-    nextProblem();
+    loadProblem();
+  }
+
+  // --- Challenge mode (出題モード) navigation ---
+  function setMode(m) {
+    if (mode === m) return;
+    mode = m;
+    showHistory = false;
+    loadProblem();
+  }
+
+  function changeChallengeLevel(l) {
+    chLevel = l;
+    chIndex = 0;
+    loadProblem();
+  }
+
+  function selectChallengeProblem(i) {
+    chIndex = i;
+    loadProblem();
+  }
+
+  function nextChallenge() {
+    if (chIndex < PROBLEMS_PER_LEVEL - 1) {
+      chIndex += 1;
+    }
+    loadProblem();
+  }
+
+  function clearAllHistory() {
+    history = clearHistory();
   }
 
   // --- Unified pointer drag & drop (mouse + touch) with tap fallback ---
@@ -210,6 +296,24 @@
       <h1 class="font-game bg-gradient-to-r from-cyan-300 via-sky-300 to-violet-400 bg-clip-text text-3xl font-bold tracking-tight text-transparent sm:text-4xl">
         Numvil
       </h1>
+      <!-- Mode toggle: Endless (free play) vs Challenge (fixed problem set) -->
+      <div class="flex gap-1 rounded-full bg-white/5 p-1 ring-1 ring-white/10">
+        {#each [{ value: 'endless', label: 'Endless' }, { value: 'challenge', label: 'Challenge' }] as m}
+          <button
+            class="rounded-full px-4 py-1.5 text-sm font-bold whitespace-nowrap transition
+              {mode === m.value
+                ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-900/40'
+                : 'text-slate-300 hover:bg-white/10'}"
+            onclick={() => setMode(m.value)}
+          >
+            {m.label}
+          </button>
+        {/each}
+      </div>
+    </header>
+
+    <!-- Mode-specific controls -->
+    {#if mode === 'endless'}
       <div class="flex flex-wrap items-center justify-end gap-2">
         <span class="rounded-full bg-white/5 px-4 py-1.5 text-sm font-bold text-cyan-300 ring-1 ring-white/10">
           Solved {solvedCount}
@@ -228,14 +332,80 @@
           {/each}
         </div>
       </div>
-    </header>
+    {:else}
+      <section class="rounded-3xl bg-white/5 p-4 shadow-xl shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl">
+        <!-- Level 1..5 selector -->
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs font-bold uppercase tracking-[0.2em] text-violet-300/70">Level</span>
+          <span class="text-xs font-bold text-cyan-300">{chSolvedCount} / {PROBLEMS_PER_LEVEL} solved</span>
+        </div>
+        <div class="mt-2 flex flex-wrap gap-1.5">
+          {#each Array(CHALLENGE_LEVELS) as _, i}
+            {@const lv = i + 1}
+            {@const lvSolved = solvedCountForLevel(history, lv)}
+            {@const lvComplete = lvSolved >= PROBLEMS_PER_LEVEL}
+            <button
+              class="relative flex flex-1 flex-col items-center rounded-xl px-3 py-1.5 leading-tight whitespace-nowrap transition
+                {chLevel === lv
+                  ? 'bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-900/40'
+                  : lvComplete
+                    ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-300/40 hover:bg-emerald-500/30'
+                    : lvSolved > 0
+                      ? 'bg-white/5 text-slate-200 ring-1 ring-cyan-300/30 hover:bg-white/10'
+                      : 'bg-white/5 text-slate-300 ring-1 ring-white/10 hover:bg-white/10'}"
+              onclick={() => changeChallengeLevel(lv)}
+              title={lvComplete
+                ? `Level ${lv} complete (${lvSolved}/${PROBLEMS_PER_LEVEL})`
+                : `Level ${lv} — ${lvSolved}/${PROBLEMS_PER_LEVEL} solved`}
+            >
+              <span class="text-sm font-bold">{lv}</span>
+              <span class="text-[10px] font-bold tabular-nums
+                {chLevel === lv ? 'text-white/80' : lvComplete ? 'text-emerald-300/90' : 'text-slate-400'}">
+                {lvSolved}/{PROBLEMS_PER_LEVEL}
+              </span>
+              {#if lvComplete}<span class="absolute -right-1 -top-1 text-xs">🏆</span>{/if}
+            </button>
+          {/each}
+        </div>
+
+        <!-- Problem 1..10 navigation (✓ = solved) -->
+        <div class="mt-3 grid grid-cols-5 gap-1.5 sm:grid-cols-10">
+          {#each chProblems as _, i}
+            {@const done = !!getSolve(history, chLevel, i)}
+            <button
+              class="relative flex h-10 items-center justify-center rounded-xl text-sm font-bold transition
+                {chIndex === i
+                  ? 'bg-gradient-to-br from-cyan-500 to-indigo-500 text-white shadow-lg shadow-indigo-900/40'
+                  : done
+                    ? 'bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-300/40 hover:bg-emerald-500/30'
+                    : 'bg-white/5 text-slate-300 ring-1 ring-white/10 hover:bg-white/10'}"
+              onclick={() => selectChallengeProblem(i)}
+              title={done ? `Solved: ${dispExpr(getSolve(history, chLevel, i).expr)}` : `Problem ${i + 1}`}
+            >
+              {i + 1}{#if done}<span class="absolute -right-0.5 -top-0.5 text-xs text-emerald-300">✓</span>{/if}
+            </button>
+          {/each}
+        </div>
+      </section>
+    {/if}
 
     <!-- Target -->
     <section class="rounded-3xl bg-white/5 p-6 text-center shadow-xl shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl">
-      <div class="text-xs font-bold uppercase tracking-[0.3em] text-cyan-300/70">Make this number</div>
+      <div class="text-xs font-bold uppercase tracking-[0.3em] text-cyan-300/70">
+        {#if mode === 'challenge'}
+          Lv {chLevel} · Problem {chIndex + 1} / {PROBLEMS_PER_LEVEL}
+        {:else}
+          Make this number
+        {/if}
+      </div>
       <div class="font-game mt-2 bg-gradient-to-br from-cyan-300 via-sky-300 to-violet-400 bg-clip-text text-6xl font-bold text-transparent sm:text-7xl">
         {problem.target}
       </div>
+      {#if mode === 'challenge' && priorSolve && !solved}
+        <div class="mt-2 text-xs font-bold text-emerald-300/80">
+          ✓ Already solved · {dispExpr(priorSolve.expr)}
+        </div>
+      {/if}
     </section>
 
     <!-- Result -->
@@ -302,12 +472,26 @@
     {#if solved}
       <section class="animate-cheer rounded-3xl bg-emerald-400/10 p-5 text-center shadow-xl shadow-black/30 ring-1 ring-emerald-300/40 backdrop-blur-xl">
         <div class="text-2xl font-bold text-emerald-300">🎉 Solved! Correct!</div>
-        <button
-          class="mt-3 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-emerald-900/40 transition hover:brightness-110"
-          onclick={nextProblem}
-        >
-          Next ▶
-        </button>
+        {#if mode === 'challenge'}
+          {#if chLevelComplete && chIndex === PROBLEMS_PER_LEVEL - 1}
+            <div class="mt-1 text-sm font-bold text-cyan-200">Level {chLevel} complete! 🏆</div>
+          {/if}
+          {#if chIndex < PROBLEMS_PER_LEVEL - 1}
+            <button
+              class="mt-3 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-emerald-900/40 transition hover:brightness-110"
+              onclick={nextChallenge}
+            >
+              Next ▶
+            </button>
+          {/if}
+        {:else}
+          <button
+            class="mt-3 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-emerald-900/40 transition hover:brightness-110"
+            onclick={nextProblem}
+          >
+            Next ▶
+          </button>
+        {/if}
       </section>
     {/if}
 
@@ -375,21 +559,62 @@
     </section>
 
     <!-- Actions -->
-    <div class="flex items-center justify-center gap-3 pb-2">
-      <button
-        class="rounded-full bg-white/5 px-8 py-2.5 font-bold text-slate-200 ring-1 ring-white/15 transition hover:bg-white/10 disabled:opacity-30"
-        onclick={surrender}
-        disabled={solved || revealed}
-      >
-        🏳️ Give up
-      </button>
-      <button
-        class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-indigo-900/40 transition hover:brightness-110"
-        onclick={nextProblem}
-      >
-        🔄 New
-      </button>
-    </div>
+    {#if mode === 'endless'}
+      <div class="flex items-center justify-center gap-3 pb-2">
+        <button
+          class="rounded-full bg-white/5 px-8 py-2.5 font-bold text-slate-200 ring-1 ring-white/15 transition hover:bg-white/10 disabled:opacity-30"
+          onclick={surrender}
+          disabled={solved || revealed}
+        >
+          🏳️ Give up
+        </button>
+        <button
+          class="rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 px-8 py-2.5 font-bold text-white shadow-lg shadow-indigo-900/40 transition hover:brightness-110"
+          onclick={nextProblem}
+        >
+          🔄 New
+        </button>
+      </div>
+    {:else}
+      <!-- Challenge mode: no answer reveal; navigate problems or review history -->
+      <div class="flex items-center justify-center gap-3 pb-2">
+        <button
+          class="rounded-full bg-white/5 px-8 py-2.5 font-bold text-slate-200 ring-1 ring-white/15 transition hover:bg-white/10"
+          onclick={() => (showHistory = !showHistory)}
+        >
+          📜 History {showHistory ? '▲' : '▼'}
+        </button>
+      </div>
+
+      {#if showHistory}
+        <section class="rounded-3xl bg-white/5 p-5 shadow-xl shadow-black/30 ring-1 ring-white/10 backdrop-blur-xl">
+          <div class="mb-3 flex items-center justify-between gap-2">
+            <span class="text-xs font-bold uppercase tracking-[0.2em] text-cyan-300/70">Solved history</span>
+            <button
+              class="shrink-0 rounded-full px-4 py-1.5 text-sm font-bold text-rose-300 transition hover:bg-white/10 disabled:opacity-30"
+              onclick={clearAllHistory}
+              disabled={recentHistory.length === 0}
+            >
+              Clear history
+            </button>
+          </div>
+          {#if recentHistory.length === 0}
+            <div class="px-2 py-6 text-center text-sm text-slate-500">No solved problems yet.</div>
+          {:else}
+            <ul class="flex flex-col gap-1.5">
+              {#each recentHistory as h}
+                <li class="flex items-center justify-between gap-3 rounded-xl bg-black/20 px-3 py-2 ring-1 ring-white/5">
+                  <span class="shrink-0 text-xs font-bold text-violet-300">Lv {h.level}·{h.index + 1}</span>
+                  <span class="font-game min-w-0 flex-1 truncate text-cyan-200" title="{dispExpr(h.expr)} = {h.target}">
+                    {dispExpr(h.expr)} = {h.target}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+      {/if}
+    {/if}
 
     <footer class="pb-2 text-center text-xs text-slate-400">
       <Badge color="indigo" class="mr-1">Rules</Badge>
