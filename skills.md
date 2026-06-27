@@ -4,8 +4,8 @@
 **実際にリポジトリで使っている技術**に沿って整理する。各項目に「用途」「主な対象ファイル」
 「必要度」を付す。必要度は ★★★=必須 / ★★=推奨 / ★=あると良い。
 
-> アーキテクチャ上の要点：ゲームのロジックはすべて **フロントエンド**（`frontend/src/lib/engine.js`）に
-> あり、Go/Wails はそれを埋め込むデスクトップシェルにすぎない。よって比重は「フロントエンド > ビルド/配布 > Go」。
+> アーキテクチャ上の要点：本プロジェクトは **フロントエンドのみの静的サイト**。ゲームのロジックは
+> すべて `frontend/src/lib/engine.js` にあり、バックエンドは無い。GitHub Pages で公開する。
 
 ---
 
@@ -43,22 +43,17 @@
 ### Vite 7 ★★
 - **用途**: 開発サーバー（HMR）と Web 静的ビルド。
 - **対象**: `frontend/vite.config.js`, `frontend/package.json` の scripts
-- **押さえどころ**: `base: './'` の意味（任意パス/Wails/`file://` で動かす）、`dev` / `dev:host` / `build` / `preview`。
+- **押さえどころ**: `base: './'` の意味（任意のホストパスで動かす）、`dev` / `dev:host` / `build` / `preview`。
 
-### Go 1.23 + Wails v2.12 ★★
-- **用途**: フロントを埋め込む Windows/デスクトップアプリ化。
-- **対象**: `main.go`, `app.go`, `wails.json`, `go.mod`
-- **押さえどころ**: `//go:embed all:frontend/dist`、`wails build -platform windows/amd64`、最小限の `App` 構造体。Go のロジック実装はほぼ不要（薄いシェル）。
+### GitHub Pages（CI 配布） ★★
+- **用途**: `main` への push で `frontend/dist` をビルドして静的公開。
+- **対象**: `.github/workflows/deploy.yml`
+- **押さえどころ**: `npm ci`→`npm test`→`npm run build`→`actions/deploy-pages`、`working-directory: frontend`、手動実行（workflow_dispatch）。
 
-### Docker / docker compose ★★
-- **用途**: 「`docker compose up` でビルド」を実現。Web+Windows、別プロファイルで Android。
-- **対象**: `Dockerfile`, `Dockerfile.android`, `docker-compose.yml`, `scripts/build.sh`, `scripts/build-android.sh`
-- **押さえどころ**: マルチステージ的な役割分担、ボリュームキャッシュ、`--profile android`、コンテナ内で `go mod tidy`→`wails build`。
-
-### Capacitor 7（Android） ★
-- **用途**: Web 静的ビルドを WebView で包んで APK 化。
-- **対象**: `capacitor.config.json`, `package.json`(ルート), `scripts/build-android.sh`
-- **押さえどころ**: `webDir=frontend/dist`、`cap add/sync/copy`、Gradle `assembleDebug`、Android SDK 前提。※本環境では未検証のベストエフォート。
+### 出題モードの問題集ジェネレータ ★
+- **用途**: 5レベル×10問の固定問題集を決定論 RNG で生成。
+- **対象**: `frontend/scripts/gen-problems.mjs` → `frontend/src/lib/problems.js`
+- **押さえどころ**: 各パーツ1個制約・レベル別の採否条件・解答例のコメント併記（画面非表示）。
 
 ---
 
@@ -80,7 +75,7 @@
 
 ### Git / GitHub ★★
 - **用途**: バージョン管理、private リポジトリ（`morststs/numvil`）への push。
-- **押さえどころ**: コミット、`.gitignore`（`node_modules`/`dist`/`output`/`pat.txt` 等を除外）、リモート操作、PAT の扱い（classic `repo` スコープ or fine-grained の Contents 権限）。
+- **押さえどころ**: コミット、`.gitignore`（`node_modules`/`frontend/dist`/`pat.txt`/`.claude` 等を除外）、リモート操作、PAT の扱い（classic `repo` スコープ or fine-grained の Contents 権限）。
 
 ### VS Code / Dev Containers ★★
 - **用途**: コンテナ内開発、ポート転送、「実行とデバッグ」からの Vite 起動。
@@ -98,8 +93,8 @@
 1. **Svelte 5 runes** と **JS（engine.js の構文解析）** … ここが本体
 2. **Vite**（`npm run dev:host` で動かす）と **Tailwind**（見た目を触る）
 3. **Node テスト**（`npm test`）で壊さない開発サイクルを回す
-4. **Docker / Wails** … 配布物（exe / web）を作る段で学ぶ
-5. **Capacitor / Playwright** … 必要になったら
+4. **GitHub Pages**（`deploy.yml`）… `main` への push で自動公開
+5. **Playwright** … 必要になったら
 
-> 「ゲームのルールや難易度を変えたい」なら **1（engine.js）だけ**でよい。
-> 「見た目を変えたい」なら **Svelte + Tailwind**。配布で初めて **Go/Docker** が要る。
+> 「ゲームのルールや難易度を変えたい」なら **1（engine.js）／問題集ジェネレータ**でよい。
+> 「見た目を変えたい」なら **Svelte + Tailwind**。

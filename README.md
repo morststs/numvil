@@ -3,6 +3,9 @@
 数字と記号のパーツを「式」に並べて「題」の数を作る計算パズルゲーム。
 名前は num（数）＋ anvil（金床）＝「数を鍛えて組み立てる」より。
 
+**フロントエンドのみの静的サイト**として動作し、GitHub Pages で公開しています。
+バックエンドはありません。
+
 4つのペインで構成されます。
 
 - **題** … 作るべき数値が表示される
@@ -10,90 +13,71 @@
 - **式** … パーツを並べる場所。計算可能なら結果を表示
 - **結果** … 現在の式の計算結果。題と一致するとクリア
 
+## モード
+
+- **Endless** … ランダム生成される問題を解き続けるフリープレイ。難易度3段階（Easy / Normal / Expert）。降参で答えの一例を表示。
+- **Challenge（出題モード）** … あらかじめ決まった 5レベル × 各10問。クリア履歴と使った数式をブラウザの localStorage に保存し、レベル選択画面に進捗（`n/10`・🏆・各問題の✓）を表示。答えは見られない。
+
 ## ルール
 
 - パーツは各1個。**1つの式で同じパーツは1回まで**使える
 - **2つの数字を並べて2桁以上の数は作れない**（例：`1` と `0` で `10` は不可）
 - 題には必ず1つ以上の解がある
-- **降参（Give up）**すると答えの一例が表示される
-- 難易度は3段階（**Easy / Normal / Expert**）で切り替え可能
-  - **Normal**：2〜3項・目標1〜50
-  - **Expert**：4〜5項・目標80〜800・`()` と（`^` または `!`）の両方が必須
+- 演算子の優先順位：`!`（階乗）> `^`（べき乗・右結合）> 単項マイナス > `* /` > `+ -`
 - UI は英語表示（ダークなクール配色）
-
-演算子の優先順位は一般的な数学に準拠：`!`（階乗）> `^`（べき乗・右結合）> 単項マイナス > `* /` > `+ -`。
 
 ## 技術スタック
 
 | 層 | 採用技術 |
 |----|----------|
-| バックエンド | Go 1.23 + Wails v2.12 |
-| フロントエンド | Svelte 5（runes）+ Vite 7 |
+| フレームワーク | Svelte 5（runes）+ Vite 7 |
 | UI | Flowbite Svelte 1.x + TailwindCSS 4（@tailwindcss/vite）|
-| Android | Capacitor（Web 静的ビルドを WebView で包む）|
+| 公開 | GitHub Pages（`.github/workflows/deploy.yml`）|
 
-ゲームのロジック（式の評価・問題生成）は **フロントエンド** の
-`frontend/src/lib/engine.js` に実装しています。これにより Web 静的配信でも
-バックエンド無しで完全に動作し、同じ成果物を Wails（デスクトップ）・
-Capacitor（Android）で再利用します。
+ゲームのロジック（式の評価・問題生成）はすべて `frontend/src/lib/engine.js` に実装。
+バックエンドは不要です。
 
-## ビルド（docker compose）
-
-```bash
-# Web 静的コンテンツ + Windows exe を ./output に出力
-docker compose up --build
-```
-
-成果物：
-
-- `output/web/index.html` … Web 静的コンテンツ（任意の静的ホスティングに配置可）
-- `output/windows/numvil.exe` … Windows 実行ファイル
-
-### Android（APK）
-
-```bash
-docker compose --profile android up --build android
-# -> output/android/app-debug.apk
-```
-
-> Android ビルドは Android SDK のダウンロードを伴います。Capacitor 7 系を使用。
-
-## 開発（ローカル）
+## 開発
 
 ```bash
 cd frontend
 npm install
-npm run dev      # http://localhost:5173 で Web 版を確認
-npm test         # 計算エンジンのテスト
+npm run dev      # http://localhost:5173 で確認
+npm test         # 計算エンジン＋出題モードのテスト
+npm run build    # -> frontend/dist（静的成果物）
 ```
 
-Wails のデスクトップ開発（要 Go + Wails CLI）：
+## 公開（GitHub Pages）
+
+`main` への push で `.github/workflows/deploy.yml` が動き、`frontend/dist` を
+ビルドして GitHub Pages へデプロイします（手動実行も可）。
+
+## 出題モードの問題集の再生成
 
 ```bash
-wails dev
+cd frontend
+node scripts/gen-problems.mjs > src/lib/problems.js
 ```
+
+決定論 RNG（seed 固定）で 5レベル × 各10問を生成し、各問の解答例をコメントに併記します
+（解答例は画面には出ません）。
 
 ## ディレクトリ構成
 
 ```
 .
-├── main.go / app.go         # Wails エントリ（frontend/dist を埋め込み）
-├── wails.json               # Wails 設定
-├── Dockerfile               # Web + Windows ビルド用イメージ
-├── Dockerfile.android       # Android(Capacitor) ビルド用イメージ
-├── docker-compose.yml       # docker compose up でビルド
-├── capacitor.config.json    # Capacitor 設定（webDir=frontend/dist）
-├── scripts/
-│   ├── build.sh             # Web + Windows
-│   └── build-android.sh     # Android APK
+├── .github/workflows/deploy.yml   # GitHub Pages デプロイ
 └── frontend/
     ├── index.html
+    ├── vite.config.js
+    ├── scripts/gen-problems.mjs   # 出題モードの問題集ジェネレータ
     ├── src/
-    │   ├── App.svelte        # 4ペインの UI
+    │   ├── App.svelte             # UI
     │   ├── main.js
     │   ├── style.css
-    │   └── lib/engine.js     # 式評価・問題生成（コアロジック）
-    └── test/engine.test.mjs  # エンジンのテスト
+    │   └── lib/
+    │       ├── engine.js          # 式評価・問題生成（コアロジック）
+    │       ├── problems.js        # 出題モードの固定問題集
+    │       └── storage.js         # クリア履歴（localStorage）
+    └── test/                      # engine / challenge / smoke テスト
 ```
-
-参考：[morststs/sirusita](https://github.com/morststs/sirusita)（Wails + Svelte5 + Flowbite の構成を踏襲）

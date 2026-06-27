@@ -1,9 +1,0 @@
-{
-  "appId": "com.numvil.app",
-  "appName": "Numvil",
-  "webDir": "frontend/dist",
-  "bundledWebRuntime": false,
-  "android": {
-    "backgroundColor": "#f5f3ff"
-  }
-}

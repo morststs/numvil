@@ -1,14 +1,8 @@
 # ビルド成果物
-build/bin
-output/
 frontend/dist
-go.sum
 
 # 依存
 node_modules/
-
-# Capacitor が生成する Android プロジェクト
-/android/
 
 # 認証情報（絶対にコミットしない）
 pat.txt
